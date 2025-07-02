@@ -1,7 +1,5 @@
 streamlit
 pandas
-scikit-learn
 rapidfuzz
+scikit-learn
 openpyxl
-matplotlib
-networkx
