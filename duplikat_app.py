@@ -29,6 +29,9 @@ if uploaded_file is not None:
 
     try:
         df = pd.read_csv(StringIO(decoded), on_bad_lines='skip')
+    except Exception as e:
+        st.error(f"Gagal parsing CSV: {e}")
+        st.stop()
 
     # Load dan proses katalog referensi jika diunggah
     catalog_file = st.file_uploader("📚 (Opsional) Upload file referensi katalog (CSV)", type=["csv"], key="catalog")
