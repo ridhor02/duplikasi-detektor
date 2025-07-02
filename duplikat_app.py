@@ -3,9 +3,7 @@ import pandas as pd
 from rapidfuzz import fuzz
 from sklearn.cluster import DBSCAN
 from sklearn.feature_extraction.text import TfidfVectorizer
-from io import StringIO
-import base64
-from difflib import SequenceMatcher
+from io import StringIO, BytesIO
 
 st.set_page_config(page_title="Deteksi Duplikat", layout="wide")
 st.title("🔎 Deteksi Duplikasi Data Teks")
@@ -38,7 +36,7 @@ if uploaded_file is not None:
     catalog_set = set()
 
     column_to_check = st.selectbox("📌 Pilih kolom untuk dicek duplikasi:", df.columns)
-    df.reset_index(inplace=True)
+    df.reset_index(inplace=True)  # Untuk tracking baris asal
 
     if catalog_file is not None:
         try:
@@ -106,17 +104,28 @@ if uploaded_file is not None:
             st.markdown(f"📊 **Jumlah cluster yang terbentuk:** {total_clusters}")
 
             if not dupes.empty:
-                st.markdown("### 🧾 Data Duplikat")
-                st.dataframe(dupes.sort_values(by='cluster'))
-
-                similarity_scores = []
+                # Hitung rata-rata kemiripan tiap baris dalam cluster
+                similarity_per_row = []
                 for cluster_id, group in dupes.groupby("cluster"):
                     texts = group[column_to_check].astype(str).tolist()
-                    scores = []
-                    for i in range(len(texts)):
-                        for j in range(i + 1, len(texts)):
-                            scores.append(fuzz.ratio(texts[i], texts[j]))
-                    avg_score = sum(scores) / len(scores) if scores else 0
+                    indices = group.index.tolist()
+                    for i, idx_i in enumerate(indices):
+                        scores = []
+                        for j, idx_j in enumerate(indices):
+                            if i != j:
+                                score = fuzz.ratio(texts[i], texts[j])
+                                scores.append(score)
+                        avg_sim = sum(scores) / len(scores) if scores else 0
+                        similarity_per_row.append((idx_i, round(avg_sim, 2)))
+
+                # Gabungkan ke dupes
+                sim_df = pd.DataFrame(similarity_per_row, columns=['index', 'avg_similarity_in_cluster'])
+                dupes = dupes.merge(sim_df, on='index')
+
+                # Rata-rata per cluster
+                similarity_scores = []
+                for cluster_id, group in dupes.groupby("cluster"):
+                    avg_score = group["avg_similarity_in_cluster"].mean()
                     similarity_scores.append({
                         "cluster": cluster_id,
                         "rata2_kemiripan": round(avg_score, 2),
@@ -124,32 +133,30 @@ if uploaded_file is not None:
                     })
 
                 score_df = pd.DataFrame(similarity_scores).sort_values(by="rata2_kemiripan", ascending=False)
+
+                st.markdown("### 🧾 Data Duplikat")
+                st.dataframe(dupes.sort_values(by='cluster'))
+
                 st.markdown("### 📈 Rata-rata Kemiripan per Cluster")
                 st.dataframe(score_df)
 
-                # 🔽 Download hasil duplikat
-                output_filename = "hasil_duplikat.xlsx"
-                dupes.to_excel(output_filename, index=False, engine='openpyxl')
-                with open(output_filename, "rb") as f:
-                    b64 = base64.b64encode(f.read()).decode()
-                    href = f'<a href="data:application/octet-stream;base64,{b64}" download="{output_filename}">⬇️ Download Hasil Duplikat (Excel)</a>'
-                    st.markdown(href, unsafe_allow_html=True)
+                # Fungsi untuk konversi ke excel in-memory
+                def to_excel_download(df_dict: dict):
+                    output = BytesIO()
+                    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                        for sheet, data in df_dict.items():
+                            data.to_excel(writer, index=False, sheet_name=sheet)
+                    processed_data = output.getvalue()
+                    return processed_data
 
-                # 🔽 Download seluruh data + cluster
-                all_filename = "data_dengan_cluster.xlsx"
-                df.to_excel(all_filename, index=False, engine='openpyxl')
-                with open(all_filename, "rb") as f:
-                    b64 = base64.b64encode(f.read()).decode()
-                    href2 = f'<a href="data:application/octet-stream;base64,{b64}" download="{all_filename}">⬇️ Download Semua Data + Cluster</a>'
-                    st.markdown(href2, unsafe_allow_html=True)
-
-                # 🔽 Download data kemiripan antar cluster
-                output_score = "kemiripan_cluster.xlsx"
-                score_df.to_excel(output_score, index=False, engine='openpyxl')
-                with open(output_score, "rb") as f:
-                    b64 = base64.b64encode(f.read()).decode()
-                    href_score = f'<a href="data:application/octet-stream;base64,{b64}" download="{output_score}">⬇️ Download Data Kemiripan Cluster (Excel)</a>'
-                    st.markdown(href_score, unsafe_allow_html=True)
+                excel_bytes = to_excel_download({
+                    "Data Duplikat": dupes,
+                    "Summary Cluster": score_df,
+                    "Seluruh Data": df
+                })
+                b64 = base64.b64encode(excel_bytes).decode()
+                href = f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64}" download="hasil_deteksi_duplikasi.xlsx">⬇️ Download Semua Hasil (Excel)</a>'
+                st.markdown(href, unsafe_allow_html=True)
 
             else:
                 st.info("✅ Tidak ada potensi duplikasi yang ditemukan.")
