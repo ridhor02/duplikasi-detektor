@@ -55,12 +55,13 @@ if uploaded_file is not None:
         min_value=30,
         max_value=100,
         value=50,
-        help="Semakin tinggi ambang kemiripan, semakin ketat pencocokan. Nilai rendah akan menemukan lebih banyak pasangan mirip, tetapi berisiko menghasilkan false positive."
+        help="Semakin tinggi ambang kemiripan, semakin ketat pencocokan."
     )
+
     method = st.radio(
         "🧠 Metode deteksi:",
         ["TF-IDF + DBSCAN", "RapidFuzz Ratio"],
-        help="TF-IDF + DBSCAN menggunakan clustering berbasis kemiripan karakter, cocok untuk data besar. RapidFuzz Ratio membandingkan pasangan baris satu per satu dan cocok untuk dataset kecil."
+        help="Pilih metode deteksi yang sesuai."
     )
 
     if st.button("🚀 Jalankan Deteksi Duplikasi"):
@@ -92,7 +93,9 @@ if uploaded_file is not None:
             if catalog_set:
                 def is_typo_match(val):
                     return any(fuzz.ratio(val.lower(), ref) >= 90 for ref in catalog_set)
-                df['valid_catalog'] = df[column_to_check].astype(str).apply(lambda x: x.lower() in catalog_set or is_typo_match(x))
+                df['valid_catalog'] = df[column_to_check].astype(str).apply(
+                    lambda x: x.lower() in catalog_set or is_typo_match(x)
+                )
 
             dupes = df.groupby('cluster').filter(lambda x: len(x) > 1)
             total_clusters = df['cluster'].nunique()
@@ -114,11 +117,17 @@ if uploaded_file is not None:
                         for j in range(i + 1, len(texts)):
                             scores.append(fuzz.ratio(texts[i], texts[j]))
                     avg_score = sum(scores) / len(scores) if scores else 0
-                    similarity_scores.append({"cluster": cluster_id, "rata2_kemiripan": round(avg_score, 2), "jumlah_baris": len(group)})
+                    similarity_scores.append({
+                        "cluster": cluster_id,
+                        "rata2_kemiripan": round(avg_score, 2),
+                        "jumlah_baris": len(group)
+                    })
+
                 score_df = pd.DataFrame(similarity_scores).sort_values(by="rata2_kemiripan", ascending=False)
                 st.markdown("### 📈 Rata-rata Kemiripan per Cluster")
                 st.dataframe(score_df)
 
+                # 🔽 Download hasil duplikat
                 output_filename = "hasil_duplikat.xlsx"
                 dupes.to_excel(output_filename, index=False, engine='openpyxl')
                 with open(output_filename, "rb") as f:
@@ -126,12 +135,22 @@ if uploaded_file is not None:
                     href = f'<a href="data:application/octet-stream;base64,{b64}" download="{output_filename}">⬇️ Download Hasil Duplikat (Excel)</a>'
                     st.markdown(href, unsafe_allow_html=True)
 
+                # 🔽 Download seluruh data + cluster
                 all_filename = "data_dengan_cluster.xlsx"
                 df.to_excel(all_filename, index=False, engine='openpyxl')
                 with open(all_filename, "rb") as f:
                     b64 = base64.b64encode(f.read()).decode()
                     href2 = f'<a href="data:application/octet-stream;base64,{b64}" download="{all_filename}">⬇️ Download Semua Data + Cluster</a>'
                     st.markdown(href2, unsafe_allow_html=True)
+
+                # 🔽 Download data kemiripan antar cluster
+                output_score = "kemiripan_cluster.xlsx"
+                score_df.to_excel(output_score, index=False, engine='openpyxl')
+                with open(output_score, "rb") as f:
+                    b64 = base64.b64encode(f.read()).decode()
+                    href_score = f'<a href="data:application/octet-stream;base64,{b64}" download="{output_score}">⬇️ Download Data Kemiripan Cluster (Excel)</a>'
+                    st.markdown(href_score, unsafe_allow_html=True)
+
             else:
                 st.info("✅ Tidak ada potensi duplikasi yang ditemukan.")
 
