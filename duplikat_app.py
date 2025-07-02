@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import base64 
 from rapidfuzz import fuzz
 from sklearn.cluster import DBSCAN
 from sklearn.feature_extraction.text import TfidfVectorizer
