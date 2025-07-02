@@ -5,6 +5,7 @@ from sklearn.cluster import DBSCAN
 from sklearn.feature_extraction.text import TfidfVectorizer
 from io import StringIO
 import base64
+from difflib import SequenceMatcher
 
 st.set_page_config(page_title="Deteksi Duplikat", layout="wide")
 st.title("🔎 Deteksi Duplikasi Data Teks")
@@ -75,7 +76,37 @@ if uploaded_file is not None:
 
             if not dupes.empty:
                 st.subheader("📌 Data Duplikat Ditemukan")
-                st.dataframe(dupes.sort_values(by='cluster'))
+                display_mode = st.radio("Tampilan:", ["Tabel biasa", "Highlight perbedaan"])
+
+                def highlight_diff(a, b):
+                    matcher = SequenceMatcher(None, a, b)
+                    result = ""
+                    for opcode, a0, a1, b0, b1 in matcher.get_opcodes():
+                        if opcode == 'equal':
+                            result += a[a0:a1]
+                        elif opcode in ['replace', 'delete', 'insert']:
+                            result += f"<span style='background-color: #ffff00'>{a[a0:a1]}</span>"
+                    return result
+
+                if display_mode == "Tabel biasa":
+                    st.dataframe(dupes.sort_values(by='cluster'))
+                else:
+                    for cluster_id, group in dupes.groupby("cluster"):
+                        st.markdown(f"#### 🔗 Cluster {cluster_id} ({len(group)} baris)")
+                        texts = group[column_to_check].astype(str).tolist()
+                        for i in range(len(texts)):
+                            for j in range(i + 1, len(texts)):
+                                a, b = texts[i], texts[j]
+                                score = fuzz.ratio(a, b)
+                                highlighted_a = highlight_diff(a, b)
+                                highlighted_b = highlight_diff(b, a)
+                                st.markdown(f"""
+                                <div style="border:1px solid #ccc; padding:10px; margin-bottom:8px; border-radius:6px; background-color:#f9f9f9">
+                                    <b>🎯 Kemiripan: {score:.1f}%</b><br><br>
+                                    <b>Baris {i+1}:</b> {highlighted_a}<br>
+                                    <b>Baris {j+1}:</b> {highlighted_b}
+                                </div>
+                                """, unsafe_allow_html=True)
 
                 # Download hasil duplikat
                 output_filename = "hasil_duplikat.xlsx"
@@ -85,7 +116,6 @@ if uploaded_file is not None:
                     href = f'<a href="data:application/octet-stream;base64,{b64}" download="{output_filename}">⬇️ Download Hasil Duplikat (Excel)</a>'
                     st.markdown(href, unsafe_allow_html=True)
 
-                # Download semua data + cluster
                 all_filename = "data_dengan_cluster.xlsx"
                 df.to_excel(all_filename, index=False, engine='openpyxl')
                 with open(all_filename, "rb") as f:
