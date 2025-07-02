@@ -86,31 +86,6 @@ if uploaded_file is not None:
             if not dupes.empty:
                 st.subheader("📌 Data Duplikat Ditemukan")
 
-                import matplotlib.pyplot as plt
-                import networkx as nx
-                from itertools import combinations
-
-                st.markdown("### 🧠 Visualisasi Graf Hubungan Antar Cluster")
-                G = nx.Graph()
-                label_map = {}
-                for cluster_id, group in dupes.groupby("cluster"):
-                    texts = group[column_to_check].astype(str).tolist()
-                    for i, j in combinations(range(len(texts)), 2):
-                        score = fuzz.ratio(texts[i], texts[j])
-                        if score >= similarity_threshold:
-                            G.add_edge(f"{cluster_id}_{i}", f"{cluster_id}_{j}", weight=score)
-                            label_map[f"{cluster_id}_{i}"] = texts[i][:30] + ("..." if len(texts[i]) > 30 else "")
-                            label_map[f"{cluster_id}_{j}"] = texts[j][:30] + ("..." if len(texts[j]) > 30 else "")
-
-                plt.figure(figsize=(12, 8))
-                pos = nx.spring_layout(G, seed=42)
-                edges = G.edges(data=True)
-                weights = [edge[2]['weight'] / 100 for edge in edges]
-                nx.draw_networkx_nodes(G, pos, node_size=500, node_color='skyblue')
-                nx.draw_networkx_edges(G, pos, width=weights)
-                nx.draw_networkx_labels(G, pos, labels=label_map, font_size=8)
-                st.pyplot(plt)
-
                 display_mode = st.radio("Tampilan:", ["Tabel biasa", "Highlight perbedaan"])
 
                 def highlight_diff(a, b):
