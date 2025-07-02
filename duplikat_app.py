@@ -33,10 +33,13 @@ if uploaded_file is not None:
         st.error(f"Gagal parsing CSV: {e}")
         st.stop()
 
-    # Load dan proses katalog referensi jika diunggah
     catalog_file = st.file_uploader("📚 (Opsional) Upload file referensi katalog (CSV)", type=["csv"], key="catalog")
     catalog_df = None
     catalog_set = set()
+
+    column_to_check = st.selectbox("📌 Pilih kolom untuk dicek duplikasi:", df.columns)
+    df.reset_index(inplace=True)
+
     if catalog_file is not None:
         try:
             catalog_decoded = catalog_file.read().decode("utf-8")
@@ -46,14 +49,7 @@ if uploaded_file is not None:
                 catalog_set = set(catalog_df[column_to_check].astype(str).str.lower())
         except Exception as e:
             st.warning(f"File katalog tidak dapat dibaca: {e}")
-        st.write("📄 **Contoh data**:", df.head())
-    except Exception as e:
-        st.error(f"Gagal parsing CSV: {e}")
-        st.stop()
 
-    df.reset_index(inplace=True)  # Simpan index asli
-
-    column_to_check = st.selectbox("📌 Pilih kolom untuk dicek duplikasi:", df.columns)
     similarity_threshold = st.slider(
         "🎯 Ambang kemiripan (persen):",
         min_value=30,
@@ -77,12 +73,6 @@ if uploaded_file is not None:
                 labels = model.fit_predict(tfidf_matrix)
                 df['cluster'] = labels
 
-            # Validasi terhadap katalog
-            if catalog_set:
-                def is_typo_match(val):
-                    return any(fuzz.ratio(val.lower(), ref) >= 90 for ref in catalog_set)
-                df['valid_catalog'] = df[column_to_check].astype(str).apply(lambda x: x.lower() in catalog_set or is_typo_match(x))
-
             elif method == "RapidFuzz Ratio":
                 texts = df[column_to_check].astype(str).tolist()
                 cluster_id = 0
@@ -98,6 +88,12 @@ if uploaded_file is not None:
                         cluster_id += 1
                 df['cluster'] = labels
 
+            # Validasi terhadap katalog
+            if catalog_set:
+                def is_typo_match(val):
+                    return any(fuzz.ratio(val.lower(), ref) >= 90 for ref in catalog_set)
+                df['valid_catalog'] = df[column_to_check].astype(str).apply(lambda x: x.lower() in catalog_set or is_typo_match(x))
+
             dupes = df.groupby('cluster').filter(lambda x: len(x) > 1)
             total_clusters = df['cluster'].nunique()
             total_rows = len(df)
@@ -107,77 +103,21 @@ if uploaded_file is not None:
             st.markdown(f"📊 **Jumlah cluster yang terbentuk:** {total_clusters}")
 
             if not dupes.empty:
-                st.subheader("📌 Data Duplikat Ditemukan")
+                st.markdown("### 🧾 Data Duplikat")
+                st.dataframe(dupes.sort_values(by='cluster'))
 
-                import matplotlib.pyplot as plt
-                import networkx as nx
-                from itertools import combinations
-
-                st.markdown("### 🧠 Visualisasi Graf Hubungan Antar Cluster")
-                G = nx.Graph()
-                label_map = {}
+                similarity_scores = []
                 for cluster_id, group in dupes.groupby("cluster"):
                     texts = group[column_to_check].astype(str).tolist()
-                    for i, j in combinations(range(len(texts)), 2):
-                        score = fuzz.ratio(texts[i], texts[j])
-                        if score >= similarity_threshold:
-                            G.add_edge(f"{cluster_id}_{i}", f"{cluster_id}_{j}", weight=score)
-                            label_map[f"{cluster_id}_{i}"] = texts[i][:30] + ("..." if len(texts[i]) > 30 else "")
-                            label_map[f"{cluster_id}_{j}"] = texts[j][:30] + ("..." if len(texts[j]) > 30 else "")
-
-                plt.figure(figsize=(12, 8))
-                pos = nx.spring_layout(G, seed=42)
-                edges = G.edges(data=True)
-                weights = [edge[2]['weight'] / 100 for edge in edges]
-                nx.draw_networkx_nodes(G, pos, node_size=500, node_color='skyblue')
-                nx.draw_networkx_edges(G, pos, width=weights)
-                nx.draw_networkx_labels(G, pos, labels=label_map, font_size=8)
-                st.pyplot(plt)
-
-                display_mode = st.radio("Tampilan:", ["Tabel biasa", "Highlight perbedaan"])
-
-                def highlight_diff(a, b):
-                    matcher = SequenceMatcher(None, a, b)
-                    result = ""
-                    for opcode, a0, a1, b0, b1 in matcher.get_opcodes():
-                        if opcode == 'equal':
-                            result += a[a0:a1]
-                        elif opcode in ['replace', 'delete', 'insert']:
-                            result += f"<span style='background-color: #ffff00'>{a[a0:a1]}</span>"
-                    return result
-
-                if display_mode == "Tabel biasa":
-                    similarity_scores = []
-                    for cluster_id, group in dupes.groupby("cluster"):
-                        texts = group[column_to_check].astype(str).tolist()
-                        scores = []
-                        for i in range(len(texts)):
-                            for j in range(i + 1, len(texts)):
-                                scores.append(fuzz.ratio(texts[i], texts[j]))
-                        avg_score = sum(scores) / len(scores) if scores else 0
-                        similarity_scores.append({"cluster": cluster_id, "rata2_kemiripan": round(avg_score, 2), "jumlah_baris": len(group)})
-                    score_df = pd.DataFrame(similarity_scores).sort_values(by="rata2_kemiripan", ascending=False)
-                    st.markdown("### 📈 Rata-rata Kemiripan per Cluster")
-                    st.dataframe(score_df)
-                    st.markdown("### 🧾 Data Duplikat")
-                    st.dataframe(dupes.sort_values(by='cluster'))
-                else:
-                    for cluster_id, group in dupes.groupby("cluster"):
-                        st.markdown(f"#### 🔗 Cluster {cluster_id} ({len(group)} baris)")
-                        texts = group[column_to_check].astype(str).tolist()
-                        for i in range(len(texts)):
-                            for j in range(i + 1, len(texts)):
-                                a, b = texts[i], texts[j]
-                                score = fuzz.ratio(a, b)
-                                highlighted_a = highlight_diff(a, b)
-                                highlighted_b = highlight_diff(b, a)
-                                st.markdown(f"""
-                                <div style=\"border:1px solid #ccc; padding:10px; margin-bottom:8px; border-radius:6px; background-color:#f9f9f9\">
-                                    <b>🎯 Kemiripan: {score:.1f}%</b><br><br>
-                                    <b>Baris {i+1}:</b> {highlighted_a}<br>
-                                    <b>Baris {j+1}:</b> {highlighted_b}
-                                </div>
-                                """, unsafe_allow_html=True)
+                    scores = []
+                    for i in range(len(texts)):
+                        for j in range(i + 1, len(texts)):
+                            scores.append(fuzz.ratio(texts[i], texts[j]))
+                    avg_score = sum(scores) / len(scores) if scores else 0
+                    similarity_scores.append({"cluster": cluster_id, "rata2_kemiripan": round(avg_score, 2), "jumlah_baris": len(group)})
+                score_df = pd.DataFrame(similarity_scores).sort_values(by="rata2_kemiripan", ascending=False)
+                st.markdown("### 📈 Rata-rata Kemiripan per Cluster")
+                st.dataframe(score_df)
 
                 output_filename = "hasil_duplikat.xlsx"
                 dupes.to_excel(output_filename, index=False, engine='openpyxl')
