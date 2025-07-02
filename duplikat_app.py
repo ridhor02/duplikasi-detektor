@@ -35,8 +35,18 @@ if uploaded_file is not None:
         st.stop()
 
     column_to_check = st.selectbox("📌 Pilih kolom untuk dicek duplikasi:", df.columns)
-    similarity_threshold = st.slider("🎯 Ambang kemiripan (persen):", 30, 100, 50)
-    method = st.radio("🧠 Metode deteksi:", ["TF-IDF + DBSCAN", "RapidFuzz Ratio"])
+    similarity_threshold = st.slider(
+        "🎯 Ambang kemiripan (persen):",
+        min_value=30,
+        max_value=100,
+        value=50,
+        help="Semakin tinggi ambang kemiripan, semakin ketat pencocokan. Nilai rendah akan menemukan lebih banyak pasangan mirip, tetapi berisiko menghasilkan false positive."
+    )
+    method = st.radio(
+        "🧠 Metode deteksi:",
+        ["TF-IDF + DBSCAN", "RapidFuzz Ratio"],
+        help="TF-IDF + DBSCAN menggunakan clustering berbasis kemiripan karakter, cocok untuk data besar. RapidFuzz Ratio membandingkan pasangan baris satu per satu dan cocok untuk dataset kecil."
+    )
 
     if st.button("🚀 Jalankan Deteksi Duplikasi"):
         try:
