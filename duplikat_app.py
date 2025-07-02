@@ -6,14 +6,13 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from io import StringIO
 import base64
 
-# Judul Aplikasi
-st.title("🚀 Deteksi Duplikasi Teks dengan TF-IDF & DBSCAN")
+st.set_page_config(page_title="Deteksi Duplikat", layout="wide")
+st.title("🔎 Deteksi Duplikasi Data Teks")
+st.markdown("Deteksi potensi data duplikat menggunakan metode **TF-IDF + DBSCAN** atau **RapidFuzz**.")
 
-# Upload file
-uploaded_file = st.file_uploader("Upload file CSV", type=["csv"])
+uploaded_file = st.file_uploader("📤 Upload file CSV", type=["csv"])
 
 if uploaded_file is not None:
-    # Deteksi encoding
     content = uploaded_file.read()
     decoded = None
     for enc in ['utf-8', 'latin1', 'windows-1252']:
@@ -27,44 +26,74 @@ if uploaded_file is not None:
         st.error("Gagal membaca file, encoding tidak dikenali.")
         st.stop()
 
-    # Baca ke DataFrame
     try:
         df = pd.read_csv(StringIO(decoded), on_bad_lines='skip')
-        st.write("Contoh data:", df.head())
+        st.write("📄 **Contoh data**:", df.head())
     except Exception as e:
         st.error(f"Gagal parsing CSV: {e}")
         st.stop()
 
-    # Pilih kolom untuk deteksi duplikasi
-    column_to_check = st.selectbox("Pilih kolom untuk dicek duplikasi:", df.columns)
+    column_to_check = st.selectbox("📌 Pilih kolom untuk dicek duplikasi:", df.columns)
+    similarity_threshold = st.slider("🎯 Ambang kemiripan (persen):", 30, 100, 50)
+    method = st.radio("🧠 Metode deteksi:", ["TF-IDF + DBSCAN", "RapidFuzz Ratio"])
 
-    similarity_threshold = st.slider("Ambang kemiripan (dalam %):", 30, 100, 50)
-
-    if st.button("🔍 Proses Deteksi Duplikasi"):
+    if st.button("🚀 Jalankan Deteksi Duplikasi"):
         try:
-            vectorizer = TfidfVectorizer(analyzer='char', ngram_range=(2, 4))
-            tfidf_matrix = vectorizer.fit_transform(df[column_to_check].astype(str))
+            df['cluster'] = -1
+            if method == "TF-IDF + DBSCAN":
+                vectorizer = TfidfVectorizer(analyzer='char', ngram_range=(2, 4))
+                tfidf_matrix = vectorizer.fit_transform(df[column_to_check].astype(str))
 
-            model = DBSCAN(eps=(1 - similarity_threshold / 100), min_samples=1, metric='cosine')
-            labels = model.fit_predict(tfidf_matrix)
+                model = DBSCAN(eps=(1 - similarity_threshold / 100), min_samples=1, metric='cosine')
+                labels = model.fit_predict(tfidf_matrix)
+                df['cluster'] = labels
 
-            df['cluster'] = labels
+            elif method == "RapidFuzz Ratio":
+                texts = df[column_to_check].astype(str).tolist()
+                cluster_id = 0
+                labels = [-1] * len(texts)
+
+                for i in range(len(texts)):
+                    if labels[i] == -1:
+                        labels[i] = cluster_id
+                        for j in range(i + 1, len(texts)):
+                            if labels[j] == -1:
+                                score = fuzz.ratio(texts[i], texts[j])
+                                if score >= similarity_threshold:
+                                    labels[j] = cluster_id
+                        cluster_id += 1
+                df['cluster'] = labels
+
+            # Hasil
             dupes = df.groupby('cluster').filter(lambda x: len(x) > 1)
+            total_clusters = df['cluster'].nunique()
+            total_rows = len(df)
+            total_dupes = len(dupes)
+
+            st.markdown(f"✅ **{total_dupes} baris terindikasi duplikat** dari total {total_rows} baris.")
+            st.markdown(f"📊 **Jumlah cluster yang terbentuk:** {total_clusters}")
 
             if not dupes.empty:
-                st.subheader("📌 Potensi Data Duplikat Ditemukan:")
-                st.dataframe(dupes.sort_values('cluster'))
+                st.subheader("📌 Data Duplikat Ditemukan")
+                st.dataframe(dupes.sort_values(by='cluster'))
 
-                # Simpan ke Excel
-                output_filename = "potensi_duplikat.xlsx"
+                # Download hasil duplikat
+                output_filename = "hasil_duplikat.xlsx"
                 dupes.to_excel(output_filename, index=False, engine='openpyxl')
-
-                # Tombol download
                 with open(output_filename, "rb") as f:
                     b64 = base64.b64encode(f.read()).decode()
-                    href = f'<a href="data:application/octet-stream;base64,{b64}" download="{output_filename}">⬇️ Download Hasil Excel</a>'
+                    href = f'<a href="data:application/octet-stream;base64,{b64}" download="{output_filename}">⬇️ Download Hasil Duplikat (Excel)</a>'
                     st.markdown(href, unsafe_allow_html=True)
+
+                # Download semua data + cluster
+                all_filename = "data_dengan_cluster.xlsx"
+                df.to_excel(all_filename, index=False, engine='openpyxl')
+                with open(all_filename, "rb") as f:
+                    b64 = base64.b64encode(f.read()).decode()
+                    href2 = f'<a href="data:application/octet-stream;base64,{b64}" download="{all_filename}">⬇️ Download Semua Data + Cluster</a>'
+                    st.markdown(href2, unsafe_allow_html=True)
             else:
-                st.info("✅ Tidak ada potensi duplikasi yang terdeteksi.")
+                st.info("✅ Tidak ada potensi duplikasi yang ditemukan.")
+
         except Exception as e:
-            st.error(f"Gagal memproses: {e}")
+            st.error(f"❌ Error saat proses deteksi: {e}")
