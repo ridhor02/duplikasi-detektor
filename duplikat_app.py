@@ -5,11 +5,11 @@ from rapidfuzz import fuzz
 from sklearn.cluster import DBSCAN
 from sklearn.feature_extraction.text import TfidfVectorizer
 from io import StringIO, BytesIO
+import plotly.express as px
 
-# Setup halaman
 st.set_page_config(page_title="🔍 Deteksi Duplikasi Data", layout="wide")
 st.title("🔎 Deteksi Duplikasi Data Teks")
-st.markdown("Deteksi potensi data duplikat menggunakan metode **TF-IDF + DBSCAN** atau **RapidFuzz**.")
+st.markdown("Deteksi potensi data duplikat menggunakan metode **TF-IDF + DBSCAN** atau **RapidFuzz Ratio**.")
 
 # Sidebar input
 with st.sidebar:
@@ -20,7 +20,7 @@ with st.sidebar:
     method = st.radio("🧠 Metode Deteksi", ["TF-IDF + DBSCAN", "RapidFuzz Ratio"])
     run_button = st.button("🚀 Jalankan Deteksi")
 
-# Proses data
+# Proses file
 if uploaded_file:
     content = uploaded_file.read()
     decoded = None
@@ -78,7 +78,6 @@ if uploaded_file:
                         cluster_id += 1
                 df['cluster'] = labels
 
-            # Validasi katalog
             if catalog_set:
                 def is_typo_match(val):
                     return any(fuzz.ratio(val.lower(), ref) >= 90 for ref in catalog_set)
@@ -86,48 +85,40 @@ if uploaded_file:
                     lambda x: x.lower() in catalog_set or is_typo_match(x)
                 )
 
-            # Ambil duplikat
             dupes = df.groupby('cluster').filter(lambda x: len(x) > 1)
-            total_clusters = df['cluster'].nunique()
-            total_rows = len(df)
-            total_dupes = len(dupes)
 
-            st.success(f"✅ Ditemukan **{total_dupes} baris duplikat** dari total **{total_rows} baris**.")
-            st.markdown(f"📊 Jumlah cluster terbentuk: `{total_clusters}`")
+            # Hitung kemiripan rata-rata per baris
+            similarity_per_row = []
+            for cluster_id, group in dupes.groupby("cluster"):
+                texts = group[column_to_check].astype(str).tolist()
+                indices = group.index.tolist()
+                for i, idx_i in enumerate(indices):
+                    scores = [
+                        fuzz.ratio(texts[i], texts[j])
+                        for j in range(len(texts)) if i != j
+                    ]
+                    avg_sim = sum(scores) / len(scores) if scores else 0
+                    similarity_per_row.append((idx_i, round(avg_sim, 2)))
 
-            if not dupes.empty:
-                # Hitung rata-rata kemiripan
-                similarity_per_row = []
-                for cluster_id, group in dupes.groupby("cluster"):
-                    texts = group[column_to_check].astype(str).tolist()
-                    indices = group.index.tolist()
-                    for i, idx_i in enumerate(indices):
-                        scores = [
-                            fuzz.ratio(texts[i], texts[j])
-                            for j in range(len(texts)) if i != j
-                        ]
-                        avg_sim = sum(scores) / len(scores) if scores else 0
-                        similarity_per_row.append((idx_i, round(avg_sim, 2)))
+            sim_df = pd.DataFrame(similarity_per_row, columns=['index', 'avg_similarity_in_cluster'])
+            dupes = dupes.merge(sim_df, on='index')
 
-                sim_df = pd.DataFrame(similarity_per_row, columns=['index', 'avg_similarity_in_cluster'])
-                dupes = dupes.merge(sim_df, on='index')
+            summary_cluster = (
+                dupes.groupby('cluster')
+                .agg(rata2_kemiripan=('avg_similarity_in_cluster', 'mean'),
+                     jumlah_baris=('index', 'count'))
+                .reset_index()
+                .sort_values(by="rata2_kemiripan", ascending=False)
+            )
+            summary_cluster['rata2_kemiripan'] = summary_cluster['rata2_kemiripan'].round(2)
 
-                summary_cluster = (
-                    dupes.groupby('cluster')
-                    .agg(rata2_kemiripan=('avg_similarity_in_cluster', 'mean'),
-                         jumlah_baris=('index', 'count'))
-                    .reset_index()
-                    .sort_values(by="rata2_kemiripan", ascending=False)
-                )
-                summary_cluster['rata2_kemiripan'] = summary_cluster['rata2_kemiripan'].round(2)
+            # Simpan ke session_state
+            st.session_state['dupes'] = dupes
+            st.session_state['df'] = df
+            st.session_state['summary_cluster'] = summary_cluster
+            st.session_state['column_to_check'] = column_to_check
 
-                # Simpan hasil ke session state
-                st.session_state['dupes'] = dupes
-                st.session_state['df'] = df
-                st.session_state['summary_cluster'] = summary_cluster
-                st.session_state['column_to_check'] = column_to_check
-
-# Tampilkan hasil jika sudah tersimpan
+# Tampilkan jika hasil sudah tersedia
 if 'dupes' in st.session_state:
     dupes = st.session_state['dupes']
     df = st.session_state['df']
@@ -155,7 +146,6 @@ if 'dupes' in st.session_state:
         st.markdown(f"📋 Menampilkan **{len(filtered_dupes)} baris** yang sesuai filter.")
         st.dataframe(filtered_dupes.sort_values(by='cluster'), use_container_width=True)
 
-        # Fungsi download
         def to_excel_download(df_dict: dict):
             output = BytesIO()
             with pd.ExcelWriter(output, engine='openpyxl') as writer:
@@ -163,7 +153,6 @@ if 'dupes' in st.session_state:
                     data.to_excel(writer, index=False, sheet_name=sheet)
             return output.getvalue()
 
-        # Tombol Download Semua
         excel_all = to_excel_download({
             "Data Duplikat": dupes,
             "Summary Cluster": summary_cluster,
@@ -173,20 +162,36 @@ if 'dupes' in st.session_state:
         href_all = f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64_all}" download="hasil_semua_duplikasi.xlsx">✅ ⬇️ Download Semua Hasil Deteksi (Excel)</a>'
         st.markdown(href_all, unsafe_allow_html=True)
 
-        # Tombol Download Filtered
         if not filtered_dupes.empty:
             excel_filtered = to_excel_download({
                 "Filtered Duplikat": filtered_dupes,
                 "Summary Cluster": summary_cluster
             })
             b64_filtered = base64.b64encode(excel_filtered).decode()
-            href_filtered = f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64_filtered}" download="hasil_filtered_duplikasi.xlsx">🎯 ⬇️ Download Hasil yang Difilter Saja (Excel)</a>'
+            href_filtered = f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64_filtered}" download="hasil_filtered_duplikasi.xlsx">🎯 ⬇️ Download Hasil yang Difilter (Excel)</a>'
             st.markdown(href_filtered, unsafe_allow_html=True)
         else:
             st.info("⚠️ Tidak ada data yang cocok dengan filter untuk diunduh.")
 
     with tab2:
+        st.subheader("📊 Tabel Ringkasan Cluster")
         st.dataframe(summary_cluster, use_container_width=True)
 
+        st.subheader("📉 Visualisasi Distribusi Kemiripan")
+        bins = [0, 50, 60, 70, 80, 90, 95, 100]
+        labels = ["0–50%", "51–60%", "61–70%", "71–80%", "81–90%", "91–95%", "96–100%"]
+        dupes['similarity_bin'] = pd.cut(dupes['avg_similarity_in_cluster'], bins=bins, labels=labels, include_lowest=True)
+        bin_counts = dupes['similarity_bin'].value_counts().sort_index()
+
+        fig = px.bar(
+            bin_counts.reset_index(),
+            x='index',
+            y='similarity_bin',
+            labels={'index': 'Rentang Kemiripan (%)', 'similarity_bin': 'Jumlah Baris'},
+            title="Distribusi Kemiripan Baris dalam Cluster"
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
     with tab3:
+        st.subheader("🗃️ Seluruh Data Asli")
         st.dataframe(df.drop(columns=['index']), use_container_width=True)
