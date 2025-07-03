@@ -9,7 +9,7 @@ from io import StringIO, BytesIO
 # Konfigurasi halaman
 st.set_page_config(page_title="🔍 Deteksi Duplikasi Data", layout="wide")
 st.title("🔎 Deteksi Duplikasi Data Teks")
-st.markdown("Deteksi potensi data duplikat menggunakan metode **TF-IDF + DBSCAN** atau **RapidFuzz**. Hasil didasarkan pada nilai kemiripan antar baris.")
+st.markdown("Deteksi potensi data duplikat menggunakan metode **TF-IDF + DBSCAN** atau **RapidFuzz Ratio**.")
 
 # Sidebar
 with st.sidebar:
@@ -57,7 +57,7 @@ if uploaded_file:
 
     if run_button:
         with st.spinner("🔍 Sedang memproses..."):
-            df.reset_index(inplace=True)  # untuk pelacakan baris
+            df.reset_index(inplace=True)  # Untuk tracking baris asal
             df['cluster'] = -1
 
             if method == "TF-IDF + DBSCAN":
@@ -95,7 +95,7 @@ if uploaded_file:
             st.markdown(f"📊 **Jumlah cluster yang terbentuk:** `{total_clusters}`")
 
             if not dupes.empty:
-                # Hitung rata-rata kemiripan per baris dalam cluster
+                # Hitung rata-rata kemiripan per baris
                 similarity_per_row = []
                 for cluster_id, group in dupes.groupby("cluster"):
                     texts = group[column_to_check].astype(str).tolist()
@@ -111,7 +111,7 @@ if uploaded_file:
                 sim_df = pd.DataFrame(similarity_per_row, columns=['index', 'avg_similarity_in_cluster'])
                 dupes = dupes.merge(sim_df, on='index')
 
-                # Rata-rata tiap cluster
+                # Summary Cluster
                 summary_cluster = (
                     dupes.groupby('cluster')
                     .agg(rata2_kemiripan=('avg_similarity_in_cluster', 'mean'),
@@ -121,35 +121,63 @@ if uploaded_file:
                 )
                 summary_cluster['rata2_kemiripan'] = summary_cluster['rata2_kemiripan'].round(2)
 
-                # Tampilkan hasil dengan tab
+                # TAB-TAB
                 tab1, tab2, tab3 = st.tabs(["📄 Data Duplikat", "📈 Summary Cluster", "🗃️ Semua Data"])
 
                 with tab1:
-                    st.dataframe(dupes.sort_values(by='cluster'), use_container_width=True)
+                    st.subheader("🔍 Filter Data Duplikat")
+                    cluster_options = sorted(dupes['cluster'].unique().tolist())
+                    selected_clusters = st.multiselect("📂 Pilih Cluster ID:", cluster_options, default=cluster_options)
+                    min_similarity = st.slider("📈 Minimum Rata-rata Kemiripan:", 0, 100, 0)
+                    keyword = st.text_input("🔎 Cari teks dalam kolom:")
+
+                    filtered_dupes = dupes[
+                        dupes['cluster'].isin(selected_clusters) &
+                        (dupes['avg_similarity_in_cluster'] >= min_similarity)
+                    ]
+                    if keyword:
+                        filtered_dupes = filtered_dupes[
+                            filtered_dupes[column_to_check].astype(str).str.contains(keyword, case=False, na=False)
+                        ]
+
+                    st.markdown(f"📋 Menampilkan **{len(filtered_dupes)} baris** yang sesuai filter.")
+                    st.dataframe(filtered_dupes.sort_values(by='cluster'), use_container_width=True)
+
+                    # === Tombol Download ===
+                    def to_excel_download(df_dict: dict):
+                        output = BytesIO()
+                        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                            for sheet, data in df_dict.items():
+                                data.to_excel(writer, index=False, sheet_name=sheet)
+                        return output.getvalue()
+
+                    # Download semua hasil
+                    excel_all = to_excel_download({
+                        "Data Duplikat": dupes,
+                        "Summary Cluster": summary_cluster,
+                        "Seluruh Data": df
+                    })
+                    b64_all = base64.b64encode(excel_all).decode()
+                    href_all = f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64_all}" download="hasil_semua_duplikasi.xlsx">✅ ⬇️ Download Semua Hasil Deteksi (Excel)</a>'
+                    st.markdown(href_all, unsafe_allow_html=True)
+
+                    # Download hasil yang difilter
+                    if not filtered_dupes.empty:
+                        excel_filtered = to_excel_download({
+                            "Filtered Duplikat": filtered_dupes,
+                            "Summary Cluster": summary_cluster
+                        })
+                        b64_filtered = base64.b64encode(excel_filtered).decode()
+                        href_filtered = f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64_filtered}" download="hasil_filtered_duplikasi.xlsx">🎯 ⬇️ Download Hasil yang Difilter Saja (Excel)</a>'
+                        st.markdown(href_filtered, unsafe_allow_html=True)
+                    else:
+                        st.info("⚠️ Tidak ada data yang cocok dengan filter untuk diunduh.")
 
                 with tab2:
                     st.dataframe(summary_cluster, use_container_width=True)
 
                 with tab3:
                     st.dataframe(df.drop(columns=['index']), use_container_width=True)
-
-                # Ekspor ke Excel
-                def to_excel_download(df_dict: dict):
-                    output = BytesIO()
-                    with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                        for sheet, data in df_dict.items():
-                            data.to_excel(writer, index=False, sheet_name=sheet)
-                    return output.getvalue()
-
-                excel_bytes = to_excel_download({
-                    "Data Duplikat": dupes,
-                    "Summary Cluster": summary_cluster,
-                    "Seluruh Data": df
-                })
-
-                b64 = base64.b64encode(excel_bytes).decode()
-                href = f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64}" download="hasil_deteksi_duplikasi.xlsx">⬇️ Download Hasil Deteksi (Excel)</a>'
-                st.markdown(href, unsafe_allow_html=True)
 
             else:
                 st.info("✅ Tidak ditemukan duplikasi berdasarkan ambang kemiripan yang dipilih.")
