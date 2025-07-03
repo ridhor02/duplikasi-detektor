@@ -11,7 +11,7 @@ st.set_page_config(page_title="🔍 Deteksi Duplikasi Data", layout="wide")
 st.title("🔎 Deteksi Duplikasi Data Teks")
 st.markdown("Deteksi potensi data duplikat menggunakan metode **TF-IDF + DBSCAN** atau **RapidFuzz Ratio**.")
 
-# Sidebar input
+# Sidebar
 with st.sidebar:
     st.header("⚙️ Pengaturan Deteksi")
     uploaded_file = st.file_uploader("📤 Upload file CSV utama", type=["csv"])
@@ -20,14 +20,14 @@ with st.sidebar:
     method = st.radio("🧠 Metode Deteksi", ["TF-IDF + DBSCAN", "RapidFuzz Ratio"])
     run_button = st.button("🚀 Jalankan Deteksi")
 
-# Proses file
+# Proses input
 if uploaded_file:
     content = uploaded_file.read()
     decoded = None
     for enc in ['utf-8', 'latin1', 'windows-1252']:
         try:
             decoded = content.decode(enc)
-            st.success(f"✅ File berhasil didekode dengan encoding: {enc}")
+            st.success(f"✅ File berhasil dibaca dengan encoding: {enc}")
             break
         except UnicodeDecodeError:
             continue
@@ -41,21 +41,21 @@ if uploaded_file:
         st.error(f"❌ Gagal parsing CSV: {e}")
         st.stop()
 
-    column_to_check = st.selectbox("📌 Pilih kolom yang akan dicek duplikasi:", df.columns)
+    column_to_check = st.selectbox("📌 Pilih kolom untuk deteksi duplikasi:", df.columns)
 
     catalog_set = set()
     if catalog_file:
         try:
             catalog_decoded = catalog_file.read().decode("utf-8")
             catalog_df = pd.read_csv(StringIO(catalog_decoded), on_bad_lines='skip')
-            st.success(f"📘 Katalog berhasil dimuat. Jumlah entri: {len(catalog_df)}")
+            st.success(f"📘 Katalog dimuat. Jumlah entri: {len(catalog_df)}")
             if column_to_check in catalog_df.columns:
                 catalog_set = set(catalog_df[column_to_check].astype(str).str.lower())
         except Exception as e:
             st.warning(f"⚠️ File katalog tidak dapat dibaca: {e}")
 
     if run_button:
-        with st.spinner("🔍 Sedang memproses..."):
+        with st.spinner("🔍 Mendeteksi duplikasi..."):
             df.reset_index(inplace=True)
             df['cluster'] = -1
 
@@ -87,7 +87,7 @@ if uploaded_file:
 
             dupes = df.groupby('cluster').filter(lambda x: len(x) > 1)
 
-            # Hitung kemiripan rata-rata per baris
+            # Rata-rata kemiripan tiap baris
             similarity_per_row = []
             for cluster_id, group in dupes.groupby("cluster"):
                 texts = group[column_to_check].astype(str).tolist()
@@ -112,13 +112,12 @@ if uploaded_file:
             )
             summary_cluster['rata2_kemiripan'] = summary_cluster['rata2_kemiripan'].round(2)
 
-            # Simpan ke session_state
             st.session_state['dupes'] = dupes
             st.session_state['df'] = df
             st.session_state['summary_cluster'] = summary_cluster
             st.session_state['column_to_check'] = column_to_check
 
-# Tampilkan jika hasil sudah tersedia
+# Tampilkan hasil
 if 'dupes' in st.session_state:
     dupes = st.session_state['dupes']
     df = st.session_state['df']
@@ -131,8 +130,8 @@ if 'dupes' in st.session_state:
         st.subheader("🔍 Filter Data Duplikat")
         cluster_options = sorted(dupes['cluster'].unique().tolist())
         selected_clusters = st.multiselect("📂 Pilih Cluster ID:", cluster_options, default=cluster_options)
-        min_similarity = st.slider("📈 Minimum Rata-rata Kemiripan:", 0, 100, 0)
-        keyword = st.text_input("🔎 Cari teks dalam kolom:")
+        min_similarity = st.slider("📈 Minimum Kemiripan:", 0, 100, 0)
+        keyword = st.text_input("🔎 Cari keyword dalam teks:")
 
         filtered_dupes = dupes[
             dupes['cluster'].isin(selected_clusters) &
@@ -159,7 +158,7 @@ if 'dupes' in st.session_state:
             "Seluruh Data": df
         })
         b64_all = base64.b64encode(excel_all).decode()
-        href_all = f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64_all}" download="hasil_semua_duplikasi.xlsx">✅ ⬇️ Download Semua Hasil Deteksi (Excel)</a>'
+        href_all = f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64_all}" download="hasil_semua_duplikasi.xlsx">✅ ⬇️ Download Semua Hasil</a>'
         st.markdown(href_all, unsafe_allow_html=True)
 
         if not filtered_dupes.empty:
@@ -168,13 +167,11 @@ if 'dupes' in st.session_state:
                 "Summary Cluster": summary_cluster
             })
             b64_filtered = base64.b64encode(excel_filtered).decode()
-            href_filtered = f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64_filtered}" download="hasil_filtered_duplikasi.xlsx">🎯 ⬇️ Download Hasil yang Difilter (Excel)</a>'
+            href_filtered = f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64_filtered}" download="hasil_filtered_duplikasi.xlsx">🎯 ⬇️ Download Hasil yang Difilter</a>'
             st.markdown(href_filtered, unsafe_allow_html=True)
-        else:
-            st.info("⚠️ Tidak ada data yang cocok dengan filter untuk diunduh.")
 
     with tab2:
-        st.subheader("📊 Tabel Ringkasan Cluster")
+        st.subheader("📊 Ringkasan Cluster")
         st.dataframe(summary_cluster, use_container_width=True)
 
         st.subheader("📉 Visualisasi Distribusi Kemiripan")
@@ -182,13 +179,15 @@ if 'dupes' in st.session_state:
         labels = ["0–50%", "51–60%", "61–70%", "71–80%", "81–90%", "91–95%", "96–100%"]
         dupes['similarity_bin'] = pd.cut(dupes['avg_similarity_in_cluster'], bins=bins, labels=labels, include_lowest=True)
         bin_counts = dupes['similarity_bin'].value_counts().sort_index()
+        df_bins = bin_counts.reset_index()
+        df_bins.columns = ['similarity_range', 'jumlah_baris']
 
         fig = px.bar(
-            bin_counts.reset_index(),
-            x='index',
-            y='similarity_bin',
-            labels={'index': 'Rentang Kemiripan (%)', 'similarity_bin': 'Jumlah Baris'},
-            title="Distribusi Kemiripan Baris dalam Cluster"
+            df_bins,
+            x='similarity_range',
+            y='jumlah_baris',
+            labels={'similarity_range': 'Rentang Kemiripan', 'jumlah_baris': 'Jumlah Baris'},
+            title="Distribusi Kemiripan dalam Cluster Duplikat"
         )
         st.plotly_chart(fig, use_container_width=True)
 
