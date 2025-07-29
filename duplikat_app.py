@@ -8,7 +8,7 @@ from io import StringIO, BytesIO
 import plotly.express as px
 
 st.set_page_config(page_title="🔍 Deteksi Duplikasi Data", layout="wide")
-st.title("🔎 Deteksi Duplikasi Data Teks")
+st.title("🔎 Deteksi Duplikasi Data Katalog PT Antang Gunung Meratus")
 st.markdown("Deteksi potensi data duplikat menggunakan metode **TF-IDF + DBSCAN** atau **RapidFuzz Ratio**.")
 
 # Sidebar
